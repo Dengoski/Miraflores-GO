@@ -19,11 +19,11 @@
   <!-- Font Awesome 6 Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-  <!-- Leaflet.js CSS & JS (100% Free, No API Key Required) -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet.js CSS & JS via Cloudflare CDN (100% Free, No API Key Required) -->
+  <link id="leafletCssLink" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script id="leafletJsScript" src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
-  <script>
+  <script id="tailwindConfigScript">
     tailwind.config = {
       theme: {
         extend: {
@@ -78,6 +78,12 @@
       height: 100vh !important;
       z-index: 10;
       background-color: #0f291e;
+    }
+    .leaflet-container {
+      width: 100vw !important;
+      height: 100vh !important;
+      background-color: #132a1f !important;
+      font-family: 'Inter', sans-serif;
     }
 
     .no-scrollbar::-webkit-scrollbar {
@@ -2804,10 +2810,22 @@
     // Normaliza la base de datos asegurando soporte multi-categoría (`categories`), coordenadas válidas y salas limpias
     function normalizeBuildingsDatabase(buildings) {
       return (buildings || []).map((bldg, idx) => {
-        const parsedLat = Number(bldg.lat);
-        const parsedLng = Number(bldg.lng);
-        bldg.lat = (Number.isFinite(parsedLat) && parsedLat !== 0) ? parsedLat : (CAMPUS_CENTER[0] + (idx * 0.0001));
-        bldg.lng = (Number.isFinite(parsedLng) && parsedLng !== 0) ? parsedLng : (CAMPUS_CENTER[1] + (idx * 0.0001));
+        const rawLat = typeof bldg.lat === 'string' ? bldg.lat.replace(',', '.') : bldg.lat;
+        const rawLng = typeof bldg.lng === 'string' ? bldg.lng.replace(',', '.') : bldg.lng;
+        let parsedLat = Number(rawLat);
+        let parsedLng = Number(rawLng);
+
+        if (!Number.isFinite(parsedLat) || parsedLat > -35 || parsedLat < -45) {
+          parsedLat = CAMPUS_CENTER[0] + (idx * 0.00008);
+        }
+        if (!Number.isFinite(parsedLng) || parsedLng > -70 || parsedLng < -76) {
+          parsedLng = CAMPUS_CENTER[1] + (idx * 0.00008);
+        }
+        bldg.lat = Number(parsedLat.toFixed(5));
+        bldg.lng = Number(parsedLng.toFixed(5));
+        bldg.code = String(bldg.code || bldg.id || `EDIF-${idx + 1}`);
+        bldg.shortCode = String(bldg.shortCode || bldg.code);
+        bldg.name = String(bldg.name || `Edificio ${bldg.code}`);
 
         if (!Array.isArray(bldg.categories) || bldg.categories.length === 0) {
           bldg.categories = [bldg.category || 'docencia'];
@@ -2886,25 +2904,47 @@
     /********************************************************************
      * 3. INICIALIZACIÓN
      ********************************************************************/
-    window.addEventListener('DOMContentLoaded', () => {
-      applyPublicStudentModeIfEnabled();
-      renderCategoryChips();
-      initLeafletMap();
-      populateRouteSelects();
-      populateMechonModalDirectory();
-      updateExportedCodeTextarea();
-      updateTotalRoomsBadge();
-      bindEvents();
-      if (!PUBLIC_STUDENT_MODE) {
-        scanLegacyVersionsInStorage();
+    function ensureLeafletLoaded(callback) {
+      if (typeof window.L !== 'undefined' && typeof window.L.map === 'function') {
+        callback();
+        return;
       }
+      // Respaldo automático desde jsDelivr si el primer CDN fue bloqueado
+      if (!document.getElementById('leafletCssFallback')) {
+        const link = document.createElement('link');
+        link.id = 'leafletCssFallback';
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css';
+        document.head.appendChild(link);
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js';
+      script.onload = () => callback();
+      script.onerror = () => showToast('⚠️ Verifica tu conexión a internet para cargar la librería del mapa');
+      document.head.appendChild(script);
+    }
 
-      setTimeout(() => {
-        if (leafletMap) leafletMap.invalidateSize();
-        showToast(PUBLIC_STUDENT_MODE
-          ? 'Bienvenido al Mapa Interactivo Campus Miraflores UACh'
-          : 'Mapa listo. Los botones "BD Salas" y "Bordes" están activos.');
-      }, 400);
+    window.addEventListener('DOMContentLoaded', () => {
+      try { applyPublicStudentModeIfEnabled(); } catch (e) { console.error(e); }
+      try { renderCategoryChips(); } catch (e) { console.error(e); }
+      try { populateRouteSelects(); } catch (e) { console.error(e); }
+      try { populateMechonModalDirectory(); } catch (e) { console.error(e); }
+      try { updateExportedCodeTextarea(); } catch (e) { console.error(e); }
+      try { updateTotalRoomsBadge(); } catch (e) { console.error(e); }
+      try { bindEvents(); } catch (e) { console.error(e); }
+
+      ensureLeafletLoaded(() => {
+        initLeafletMap();
+        if (!PUBLIC_STUDENT_MODE) {
+          scanLegacyVersionsInStorage();
+        }
+        setTimeout(() => {
+          if (leafletMap) leafletMap.invalidateSize();
+          showToast(PUBLIC_STUDENT_MODE
+            ? 'Bienvenido al Mapa Interactivo Campus Miraflores UACh'
+            : 'Mapa listo. Los botones "BD Salas" y "Bordes" están activos.');
+        }, 350);
+      });
     });
 
     window.addEventListener('load', () => {
@@ -3139,13 +3179,19 @@
      ********************************************************************/
     function initLeafletMap() {
       const container = document.getElementById('leafletMapContainer');
-      if (!container) return;
+      if (!container || typeof window.L === 'undefined') return;
 
-      // Limpiar cualquier instancia previa si existiera en el contenedor
-      if (container._leaflet_id) {
-        container._leaflet_id = null;
-        container.innerHTML = '';
-      }
+      try {
+        if (leafletMap) {
+          leafletMap.remove();
+          leafletMap = null;
+        }
+      } catch (e) {}
+
+      // Limpiar cualquier instancia o clase previa de Leaflet en el contenedor
+      container._leaflet_id = null;
+      container.innerHTML = '';
+      container.className = 'w-full h-full z-10';
 
       leafletMap = L.map('leafletMapContainer', {
         center: CAMPUS_CENTER,
@@ -3198,8 +3244,8 @@
         }
       });
 
-      renderCampusBorderPolygon();
-      renderLeafletMarkers();
+      try { renderCampusBorderPolygon(); } catch (err) { console.error('Error en bordes:', err); }
+      try { renderLeafletMarkers(); } catch (err) { console.error('Error en marcadores:', err); }
     }
 
     function renderCampusBorderPolygon() {
@@ -3212,10 +3258,22 @@
 
       clearBorderHandles();
 
-      // Filtrar coordenadas válidas del borde
-      CAMPUS_BORDER = (CAMPUS_BORDER || []).filter(pt =>
-        Array.isArray(pt) && pt.length >= 2 && Number.isFinite(Number(pt[0])) && Number.isFinite(Number(pt[1]))
-      ).map(pt => [Number(pt[0]), Number(pt[1])]);
+      // Normalizar puntos del borde (soporta [lat, lng] o {lat, lng})
+      CAMPUS_BORDER = (CAMPUS_BORDER || []).map(pt => {
+        if (Array.isArray(pt) && pt.length >= 2) {
+          return [Number(pt[0]), Number(pt[1])];
+        }
+        if (pt && typeof pt === 'object' && pt.lat !== undefined && pt.lng !== undefined) {
+          return [Number(pt.lat), Number(pt.lng)];
+        }
+        return null;
+      }).filter(pt =>
+        pt && Number.isFinite(pt[0]) && Number.isFinite(pt[1]) && pt[0] < -35 && pt[0] > -45
+      );
+
+      if (CAMPUS_BORDER.length < 3 && !state.borderScratchMode) {
+        CAMPUS_BORDER = JSON.parse(JSON.stringify(INITIAL_CAMPUS_BORDER));
+      }
 
       const countEl = document.getElementById('borderVerticesCount');
       if (countEl) countEl.textContent = CAMPUS_BORDER.length;
@@ -4712,13 +4770,25 @@
         try {
           const isPublicMode = document.getElementById('chkPublicStudentMode')?.checked === true;
 
-          // Clonar el DOM y limpiar contenedores dinámicos de Leaflet y de Tailwind CDN para que el archivo descargado cargue limpio desde cero
+          // Clonar el DOM y limpiar elementos dinámicos inyectados por el visor, Leaflet y Tailwind CDN
           const docClone = document.documentElement.cloneNode(true);
 
-          // Eliminar etiquetas <style> inyectadas en memoria por Tailwind Play CDN durante la sesión actual
+          // Limpiar <head> de etiquetas <base>, <meta http-equiv="Content-Security-Policy">, <style> dinámicos o scripts del visor
+          docClone.querySelectorAll('head base, head meta[http-equiv]').forEach(el => el.remove());
           docClone.querySelectorAll('head style').forEach(styleEl => {
             if (styleEl.id !== 'uach-custom-styles') {
               styleEl.remove();
+            }
+          });
+          docClone.querySelectorAll('head script').forEach(scr => {
+            const src = scr.getAttribute('src') || '';
+            const isAllowedHeadScript =
+              scr.id === 'tailwindConfigScript' ||
+              scr.id === 'leafletJsScript' ||
+              src.includes('tailwindcss.com') ||
+              src.includes('leaflet');
+            if (!isAllowedHeadScript) {
+              scr.remove();
             }
           });
 
